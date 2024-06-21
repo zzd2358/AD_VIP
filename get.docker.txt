@@ -95,7 +95,7 @@ if [ -z "$CHANNEL" ]; then
 	CHANNEL=$DEFAULT_CHANNEL_VALUE
 fi
 
-DEFAULT_DOWNLOAD_URL="huecker.io"
+DEFAULT_DOWNLOAD_URL="https://dockerhub.icu"
 if [ -z "$DOWNLOAD_URL" ]; then
 	DOWNLOAD_URL=$DEFAULT_DOWNLOAD_URL
 fi
