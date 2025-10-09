@@ -22,7 +22,22 @@ DOMAIN-SUFFIX,tumbex.com
 DOMAIN-SUFFIX,twdvd.com
 DOMAIN-SUFFIX,unsplash.com
 DOMAIN-SUFFIX,buzzsprout.com
-
+# NAME: TikTok
+user-agent, TikTok*, proxy
+DOMAIN-SUFFIX,p16-tiktokcdn-com.akamaized.net, proxy
+DOMAIN-SUFFIX,byteoversea.com, proxy
+DOMAIN-SUFFIX,ibytedtos.com, proxy
+DOMAIN-SUFFIX,ibyteimg.com, proxy
+DOMAIN-SUFFIX,ipstatp.com, proxy
+DOMAIN-SUFFIX,muscdn.com, proxy
+DOMAIN-SUFFIX,musical.ly, proxy
+DOMAIN-SUFFIX,sgpstatp.com, proxy
+DOMAIN-SUFFIX,snssdk.com, proxy
+DOMAIN-SUFFIX,tik-tokapi.com, proxy
+DOMAIN-SUFFIX,tiktok.com, proxy
+DOMAIN-SUFFIX,tiktokcdn.com, proxy
+DOMAIN-SUFFIX,tiktokv.com, proxy
+DOMAIN-KEYWORD,-tiktokcdn-com, proxy
 # Pornhub
 DOMAIN-SUFFIX,phncdn.com
 DOMAIN-SUFFIX,phprcdn.com
