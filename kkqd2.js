@@ -1,6 +1,6 @@
 /*
  * 夸克网盘自动获取参数 & 每日签到
- * 适配：Quantumult X, Surge, Loon
+ * 适配：Quantumult X, Surge, Loon, Shadowrocket
  */
 
 const $ = new Env("夸克网盘自动签到");
@@ -109,11 +109,11 @@ function request(url, method = "GET", body = null) {
             url: url,
             headers: {
                 "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_2 like Mac OS X; zh-cn) AppleWebKit/601.1.46 (KHTML, like Gecko) Mobile/19C56 Quark/10.9.5.3027 Mobile",
-                "Content-Type": "application/json"
-                            "Accept": "application/json, text/plain, */*",
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/plain, */*",
                 "Accept-Encoding": "gzip, deflate, br",
                 "Accept-Language": "zh-CN,zh;q=1",
-                "Connection": "keep-alive",
+                "Connection": "keep-alive"
             }
         };
         if (body && method === "POST") options.body = body;
