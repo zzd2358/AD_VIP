@@ -1,30 +1,63 @@
 /*
- * Quark Netdisk Auto Check-in
- * Description: Automatically check in to earn coins and complete tasks
+ * Quark Netdisk Auto Check-in & Get Cookie
+ * Description: 自动获取 Cookie 并每日自动签到、做任务领空间/金币
  * Author: 
- * Version: 1.3.4
+ * Version: 1.4.0
  */
 
 const $ = new API("quark", "quark_ck");
+
+// 兼容原始脚本的 getdata/setdata 方法
+$.getdata = (key) => $.read(key);
+$.setdata = (val, key) => $.write(val, key);
+
+const COOKIE_KEY = "CookieQUARK";
 const LOGINTASK = "b9ca6c75f22a430d83e2ac7cc329e434";
 const FREETIME = "c2f654702eaf484c86a75fd5ff9e8a9b";
 const TASKLIST = "sign_in_31-day";
 const COINURL = "https://drive-m.quark.cn/1/clouddrive/capacity/coin/v1/list?";
 const COINLOG = "https://drive-m.quark.cn/1/clouddrive/capacity/coin/v1/record?";
 
-!(async () => {
-    let cookie = $.getdata("CookieQUARK");
-    if (!cookie) {
-        console.log("❌ No Quark cookie found, please set the cookie first!");
-        return;
-    }
+// 判断当前是请求拦截（获取Cookie）还是定时任务（执行签到）
+const isRequest = typeof $request !== "undefined";
 
-    $.setstatus();
-    await signin(cookie);
-    await init(cookie);
-})().catch((e) => {
-    console.log(`❌ Error occurred: ${e.message}`);
-}).finally(() => $.done());
+if (isRequest) {
+    // 拦截请求，获取 Cookie
+    getCookie();
+    $.done();
+} else {
+    // 执行定时任务
+    !(async () => {
+        let cookie = $.getdata(COOKIE_KEY);
+        if (!cookie) {
+            console.log("❌ 未找到 Quark Cookie，请先获取 Cookie！");
+            $.notify("夸克网盘", "❌ 签到失败", "未找到 Cookie，请先开启重写规则并打开夸克App获取。");
+            return;
+        }
+
+        $.setstatus();
+        await signin(cookie);
+        await init(cookie);
+    })().catch((e) => {
+        console.log(`❌ 发生错误: ${e.message}`);
+    }).finally(() => $.done());
+}
+
+// ----------------- 核心功能函数 -----------------
+
+function getCookie() {
+    if ($request.headers) {
+        const cookie = $request.headers["Cookie"] || $request.headers["cookie"];
+        if (cookie) {
+            const currentCookie = $.getdata(COOKIE_KEY);
+            if (currentCookie !== cookie) {
+                $.setdata(cookie, COOKIE_KEY);
+                $.notify("夸克网盘", "✅ 获取 Cookie 成功", "Cookie已更新，现在可以关闭获取Cookie的重写规则了！");
+                console.log(`✅ 成功获取 Cookie: ${cookie}`);
+            }
+        }
+    }
+}
 
 async function init(cookie) {
     try {
@@ -62,9 +95,12 @@ async function signin(cookie) {
         
         if (signinResp && signinResp.data) {
             const { sign_count, history_sign_count } = signinResp.data;
-            console.log(`✅ Sign-in successful! Today's sign-in count: ${sign_count}, Total sign-ins: ${history_sign_count}`);
+            const msg = `✅ 签到成功! 今日签到: ${sign_count}, 总计: ${history_sign_count}`;
+            console.log(msg);
+            $.notify("夸克网盘", "每日签到状态", msg);
         } else {
-            console.log("⚠️ Already signed in today or sign-in failed");
+            console.log("⚠️ 已签到或签到失败");
+            $.notify("夸克网盘", "每日签到状态", "⚠️ 今日已签到或签到失败");
         }
     } catch (error) {
         console.log(`❌ Sign-in error: ${error.message}`);
@@ -176,13 +212,13 @@ async function sendRequest(url, cookie, method = "GET", data = null) {
         headers: {
             "Accept": "application/json, text/plain, */*",
             "Accept-Encoding": "gzip, deflate, br",
-            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
             "Connection": "keep-alive",
             "Content-Type": "application/json",
             "Cookie": cookie,
             "Host": "pan.quark.cn",
             "Referer": "https://pan.quark.cn/",
-            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) quark-cloud-drive/2.5.20 Quark/2.5.20 Channel/AppleStore NeDB/1.0.0 OS/ios iOS/16.5"
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) quark-cloud-drive/2.5.20 Quark/2.5.20"
         }
     };
 
@@ -194,6 +230,8 @@ async function sendRequest(url, cookie, method = "GET", data = null) {
     return response.json();
 }
 
+// ----------------- 底层封装类 -----------------
+
 function ENV() {
     const isQX = typeof $task !== "undefined";
     const isLoon = typeof $loon !== "undefined";
@@ -203,325 +241,110 @@ function ENV() {
     const isStash = "undefined" !== typeof $environment && $environment["stash"];
     const isShadowRocket = "undefined" !== typeof $rocket;
 
-    const safeGet = (data) => {
-        try {
-            if (typeof JSON.parse(data) == "object") {
-                return true;
-            }
-        } catch (e) {
-            console.log(e);
-            return false;
-        }
-    };
-
-    const isAvailableStatus = (response) => {
-        return response.status !== undefined && response.status >= 200 && response.status <= 299;
-    };
-
     const notify = (title, subtitle, message) => {
         if (isQX) $notify(title, subtitle, message);
         if (isLoon) $notification.post(title, subtitle, message);
         if (isSurge) $notification.post(title, subtitle, message);
         if (isNode) console.log(JSON.stringify({ title, subtitle, message }));
-        if (isBrowser) alert(message);
     };
 
     const write = (value, key) => {
         if (isQX) return $prefs.setValueForKey(value, key);
         if (isLoon) return $persistentStore.write(value, key);
-        if (isSurge) return $storage.setItem(key, value);
+        if (isSurge) return $persistentStore.write(value, key);
     };
 
     const read = (key) => {
         if (isQX) return $prefs.valueForKey(key);
         if (isLoon) return $persistentStore.read(key);
-        if (isSurge) return $storage.getItem(key);
-    };
-
-    const adapterStatus = (response) => {
-        if (response.status) {
-            response["statusCode"] = response.status;
-        } else if (response.statusCode) {
-            response["status"] = response.statusCode;
-        }
-        return response;
-    };
-
-    const get = (options, callback) => {
-        options.headers["User-Agent"] = "Quantumult%20X";
-        if (isQX) {
-            if (typeof options.url === "string")
-                options.url = options.url.replace(/@@/g, "&");
-            $task.fetch(options).then(
-                (response) => {
-                    callback(null, adapterStatus(response), response.body);
-                },
-                (reason) => callback(reason.error, null, null)
-            );
-        }
-    };
-
-    const post = (options, callback) => {
-        if (options.body) options.headers["Content-Type"] = "application/x-www-form-urlencoded";
-        options.headers["User-Agent"] = "Quantumult%20X";
-        if (isQX) {
-            if (typeof options.url === "string")
-                options.url = options.url.replace(/@@/g, "&");
-            $task.fetch(options).then(
-                (response) => {
-                    callback(null, adapterStatus(response), response.body);
-                },
-                (reason) => callback(reason.error, null, null)
-            );
-        }
+        if (isSurge) return $persistentStore.read(key);
     };
 
     return {
-        isQX,
-        isLoon,
-        isSurge,
-        isBrowser,
-        isNode,
-        isStash,
-        isShadowRocket,
-        notify,
-        write,
-        read,
-        get,
-        post,
-        isAvailableStatus,
-        safeGet,
+        isQX, isLoon, isSurge, isBrowser, isNode, isStash, isShadowRocket, notify, write, read
     };
 }
 
 function HTTP(defaultOptions = {}) {
-    const { isQX, isLoon, isSurge, isBrowser, isNode } = ENV();
+    const { isQX, isLoon, isSurge, isNode } = ENV();
     const methods = ["GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "PATCH"];
-    const URL_REGEX = /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/;
 
     function send(method, options) {
         options = typeof options === "string" ? { url: options } : options;
-        const baseURL = defaultOptions["url"];
-        if (baseURL && !URL_REGEX.test(options.url || "")) {
-            options.url = baseURL ? baseURL + options.url : options.url;
-        }
         if (options.body && options.headers && !options.headers["Content-Type"]) {
             options.headers["Content-Type"] = "application/x-www-form-urlencoded";
         }
-        options = { ...defaultOptions, ...options };
         const timeout = options.timeout || 20000;
-        const events = {
-            ...{
-                onRequest: () => {},
-                onResponse: (resp) => resp,
-                onTimeout: () => {},
-            },
-            ...options.events,
-        };
-
-        events.onRequest(method, options);
 
         let worker;
         if (isQX) {
-            worker = $task.fetch({
-                method,
-                url: options.url,
-                headers: options.headers,
-                body: options.body,
-            });
+            worker = $task.fetch({ method, url: options.url, headers: options.headers, body: options.body });
         }
         if (isLoon || isSurge || isNode) {
             const request = isNode ? require("request") : $httpClient;
             worker = new Promise((resolve, reject) => {
-                const timer = setTimeout(() => {
-                    events.onTimeout();
-                    return reject("timeout");
-                }, timeout);
-                request[method.toLowerCase()](
-                    options.url,
-                    options,
-                    (err, response, body) => {
-                        clearTimeout(timer);
-                        if (err) reject(err);
-                        else
-                            resolve(
-                                events.onResponse({
-                                    statusCode: response.status || response.statusCode,
-                                    headers: response.headers,
-                                    body,
-                                })
-                            );
-                    }
-                );
+                request[method.toLowerCase()](options, (err, response, body) => {
+                    if (err) reject(err);
+                    else resolve({ statusCode: response.status || response.statusCode, headers: response.headers, body });
+                });
             });
         }
-        if (isBrowser)
-            worker = new Promise((resolve, reject) => {
-                const xhr = new XMLHttpRequest();
-                const timer = setTimeout(() => {
-                    events.onTimeout();
-                    return reject("timeout");
-                }, timeout);
-                xhr.open(method, options.url, true);
-                const headers = options.headers || {};
-                Object.keys(headers).forEach((name) => {
-                    xhr.setRequestHeader(name, headers[name]);
-                });
-                xhr.onload = () => {
-                    clearTimeout(timer);
-                    resolve(
-                        events.onResponse({
-                            statusCode: xhr.status,
-                            headers: xhr.getAllResponseHeaders(),
-                            body: xhr.responseText,
-                        })
-                    );
-                };
-                xhr.onerror = () => {
-                    clearTimeout(timer);
-                    reject(xhr.statusText);
-                };
-                xhr.send(options.body || "");
-            });
 
         return worker.then((res) => {
             res.json = () => {
-                try {
-                    return JSON.parse(res.body);
-                } catch {
-                    return null;
-                }
+                try { return JSON.parse(res.body); } catch { return null; }
             };
             return res;
         });
     }
 
     const http = {};
-    methods.forEach(
-        (method) =>
-            (http[method.toLowerCase()] = (options) => send(method, options))
-    );
+    methods.forEach((method) => (http[method.toLowerCase()] = (options) => send(method, options)));
     return http;
 }
 
 function API(name = "untitled", debug = false) {
-    const { isQX, isLoon, isSurge, isBrowser, isNode, isStash } = ENV();
+    const { isQX, isLoon, isSurge, isNode, isStash } = ENV();
     return new (class {
         constructor(name, debug) {
             this.name = name;
             this.debug = debug;
-
             this.http = HTTP();
             this.env = ENV();
-
-            this.node = (() => {
-                if (isNode) {
-                    const fs = require("fs");
-
-                    return {
-                        fs,
-                    };
-                } else {
-                    return null;
-                }
-            })();
             this.initCache();
-
-            const delay = (t, v) =>
-                new Promise(function (resolve) {
-                    setTimeout(resolve.bind(null, v), t);
-                });
-
-            Promise.prototype.delay = function (t) {
-                return this.then(function (v) {
-                    return delay(t, v);
-                });
-            };
         }
 
         initCache() {
             if (isQX) this.cache = JSON.parse($prefs.valueForKey(this.name) || "{}");
-            if (isLoon || isSurge)
-                this.cache = JSON.parse($persistentStore.read(this.name) || "{}");
-
-            if (isNode) {
-                this.cachePath =
-                    "nodejs_cache_" +
-                    this.name +
-                    ".json";
-                const exists = this.node.fs.existsSync(this.cachePath);
-                const data = exists ? this.node.fs.readFileSync(this.cachePath) : "{}";
-                this.cache = JSON.parse(data);
-            }
+            if (isLoon || isSurge) this.cache = JSON.parse($persistentStore.read(this.name) || "{}");
         }
 
         persistCache() {
             const data = JSON.stringify(this.cache);
             if (isQX) $prefs.setValueForKey(data, this.name);
             if (isLoon || isSurge) $persistentStore.write(data, this.name);
-            if (isNode)
-                this.node.fs.writeFileSync(this.cachePath, data);
         }
 
         write(data, key) {
             this.cache[key] = data;
             this.persistCache();
+            return this.env.write(data, key);
         }
 
         read(key) {
-            return this.cache[key];
+            return this.env.read(key) || this.cache[key];
         }
 
         setstatus(status) {
-            if (this.isQuanX()) $prefs.setValueForKey(status, "switch_" + this.name);
+            if (isQX) $prefs.setValueForKey(status, "switch_" + this.name);
         }
 
-        getstatus() {
-            if (this.isQuanX())
-                return $prefs.valueForKey("switch_" + this.name) === "true";
-            else return true;
-        }
-
-        log(...logs) {
-            if (this.debug) console.log(...logs);
-        }
-
-        info(msg) {
-            console.log(`[${this.name}] Info: ${msg}`);
-        }
-
-        error(msg) {
-            console.log(`[${this.name}] Error: ${msg}`);
+        notify(title, subtitle, message) {
+            this.env.notify(title, subtitle, message);
         }
 
         done(value = {}) {
-            if (isQX || isLoon || isSurge) {
-                $done(value);
-            }
-        }
-
-        isQuanX() {
-            return isQX;
-        }
-
-        isLoon() {
-            return isLoon;
-        }
-
-        isSurge() {
-            return isSurge;
-        }
-
-        isBrowser() {
-            return isBrowser;
-        }
-
-        isNode() {
-            return isNode;
-        }
-
-        isStash() {
-            return isStash;
+            if (isQX || isLoon || isSurge) $done(value);
         }
     })(name, debug);
 }
