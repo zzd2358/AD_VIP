@@ -212,13 +212,13 @@ async function sendRequest(url, cookie, method = "GET", data = null) {
         headers: {
             "Accept": "application/json, text/plain, */*",
             "Accept-Encoding": "gzip, deflate, br",
-            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "Accept-Language": "zh-CN,zh;q=1,
             "Connection": "keep-alive",
             "Content-Type": "application/json",
             "Cookie": cookie,
             "Host": "pan.quark.cn",
             "Referer": "https://pan.quark.cn/",
-            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) quark-cloud-drive/2.5.20 Quark/2.5.20"
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_2 like Mac OS X; zh-cn) AppleWebKit/601.1.46 (KHTML, like Gecko) Mobile/19C56 Quark/10.9.5.3027 Mobile"
         }
     };
 
