@@ -1,383 +1,293 @@
 /*
-夸克网盘自动签到 - 真长期稳定防风控版 (已修复版)
+夸克网盘自动签到 - 长期稳定防风控版（固定 Quark UA）
 支持：Quantumult X / Surge / Loon / Shadowrocket
-功能：
-自动抓取 Cookie / kps / sign / vcode
-自动 Cookie 更新
-支持新版 v2 接口
-多接口 fallback
-风控随机延迟
-自动失败重试
-JSON 容错
-风控页面兼容
-Cookie 失效检测
-长期稳定版
-
-抓包地址：
-https://drive-m.quark.cn/1/clouddrive/capacity/growth/
-
-建议 cron：
-0 8,12,18 * * *
+功能：自动抓取 kps/sign/vcode/Cookie | 自动续 Cookie | 支持新版 v2 接口
+防风控随机延迟 | 自动失败重试 | Cookie 失效检测
 */
-
 const $ = new Env("夸克网盘长期稳定版");
 const isRequest = typeof $request !== "undefined";
 const BASE_URL = "https://drive-m.quark.cn";
 
 // 固定真实 Quark UA
-const QUARK_UA =
-  "Mozilla/5.0 (iPhone; CPU iPhone OS 15_2 like Mac OS X; zh-cn) AppleWebKit/601.1.46 (KHTML, like Gecko) Mobile/19C56 Quark/10.9.5.3027 Mobile";
+const QUARK_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 15_2 like Mac OS X; zh-cn) AppleWebKit/601.1.46 (KHTML, like Gecko) Mobile/19C56 Quark/10.9.5.3027 Mobile";
 
 const API = {
-  info: [
-    "/1/clouddrive/capacity/growth/v2/info",
-    "/1/clouddrive/capacity/growth/info"
-  ],
-  sign: [
-    "/1/clouddrive/capacity/growth/v2/sign",
-    "/1/clouddrive/capacity/growth/sign"
-  ],
-  task: [
-    "/1/clouddrive/capacity/growth/task"
-  ]
+    info: ["/1/clouddrive/capacity/growth/v2/info", "/1/clouddrive/capacity/growth/info"],
+    sign: ["/1/clouddrive/capacity/growth/v2/sign", "/1/clouddrive/capacity/growth/sign"],
+    task: ["/1/clouddrive/capacity/growth/task"]
 };
 
 if (isRequest) {
-  extractParams();
-  $.done();
+    extractParams();
+    $.done();
 } else {
-  !(async () => {
-    // 防风控随机启动
-    await randomSleep(1, 3);
-    await doSign();
-  })()
+    !(async () => {
+        await randomSleep(5, 300);
+        await doSign();
+    })()
     .catch((e) => $.logErr(e))
     .finally(() => $.done());
 }
 
 /* ========================= 参数抓取 ========================= */
-
 function extractParams() {
-  const url = $request.url || "";
-  const headers = $request.headers || {};
+    const url = $request.url;
+    const headers = $request.headers || {};
+    const kpsMatch = url.match(/kps=([^&]+)/);
+    const signMatch = url.match(/sign=([^&]+)/);
+    const vcodeMatch = url.match(/vcode=([^&]+)/);
+    if (!kpsMatch || !kpsMatch[1]) return;
 
-  const kpsMatch = url.match(/kps=([^&]+)/);
-  const signMatch = url.match(/sign=([^&]+)/);
-  const vcodeMatch = url.match(/vcode=([^&]+)/);
-
-  // 兼容大小写 Cookie 键名
-  const cookie = headers.Cookie || headers.cookie || "";
-
-  let isUpdated = false;
-
-  if (kpsMatch && kpsMatch[1]) {
     const kps = decodeURIComponent(kpsMatch[1]);
+    const sign = signMatch ? decodeURIComponent(signMatch[1]) : " ";
+    const vcode = vcodeMatch ? decodeURIComponent(vcodeMatch[1]) : " ";
+    const cookie = headers.Cookie || headers.cookie || " ";
+
     $.setdata(kps, "quark_kps");
-    isUpdated = true;
-  }
-
-  if (signMatch && signMatch[1]) {
-    const sign = decodeURIComponent(signMatch[1]);
     $.setdata(sign, "quark_sign");
-    isUpdated = true;
-  }
-
-  if (vcodeMatch && vcodeMatch[1]) {
-    const vcode = decodeURIComponent(vcodeMatch[1]);
     $.setdata(vcode, "quark_vcode");
-    isUpdated = true;
-  }
-
-  if (cookie) {
-    $.setdata(cookie, "quark_cookie");
-    isUpdated = true;
-  }
-
-  if (isUpdated) {
+    if (cookie && cookie !== " ") $.setdata(cookie, "quark_cookie");
     $.setdata(Date.now().toString(), "quark_refresh_time");
-    $.msg($.name, "参数抓取成功", "Cookie / kps / sign / vcode 已更新");
-  }
+
+    $.msg($.name, "✅ 参数更新成功", "已自动更新 Cookie 及 Token");
+    $.log("参数已自动更新");
 }
 
-/* ========================= 主签到 ========================= */
-
+/* ========================= 主签到逻辑 ========================= */
 async function doSign() {
-  const cookie = $.getdata("quark_cookie");
-  const kps = $.getdata("quark_kps");
-  const sign = $.getdata("quark_sign");
-  const vcode = $.getdata("quark_vcode");
-
-  if (!cookie || !kps || !sign || !vcode) {
-    $.msg($.name, "缺少参数", "请先打开夸克网盘完成抓包");
-    return;
-  }
-
-  checkExpired();
-
-  const headers = buildHeaders(cookie);
-
-  let infoData = null;
-
-  for (const path of API.info) {
-    try {
-      const url =
-        BASE_URL +
-        path +
-        `?pr=ucpro&fr=pc&kps=${encodeURIComponent(kps)}&sign=${encodeURIComponent(sign)}&vcode=${encodeURIComponent(vcode)}`;
-
-      $.log(`查询信息接口: ${path}`);
-
-      const resp = await request({
-        url,
-        method: "GET",
-        headers
-      });
-
-      const data = parseJSONSafe(resp.body);
-
-      if (data && data.data) {
-        infoData = data.data;
-        break;
-      }
-    } catch (e) {
-      $.log(`信息接口失败: ${e}`);
+    if (checkExpired()) return;
+    const today = new Date().toDateString();
+    const lastSign = $.getdata("quark_last_sign");
+    if (lastSign === today) {
+        $.log("今日已签到，跳过运行");
+        return;
     }
-  }
 
-  if (!infoData) {
-    $.msg($.name, "获取签到信息失败", "Cookie 可能失效");
-    return;
-  }
+    const kps = $.getdata("quark_kps");
+    const sign = $.getdata("quark_sign") || " ";
+    const vcode = $.getdata("quark_vcode") || " ";
 
-  if (infoData.cap_sign && infoData.cap_sign.sign_daily) {
-    const reward =
-      infoData.cap_sign.sign_daily_reward || 0;
-
-    $.msg(
-      $.name,
-      "今日已签到",
-      `已获得 ${reward} MB`
-    );
-
-    return;
-  }
-
-  await randomSleep(1, 3);
-
-  let signSuccess = false;
-  let rewardText = "";
-
-  for (const path of API.sign) {
-    try {
-      const url =
-        BASE_URL +
-        path +
-        `?pr=ucpro&fr=pc&kps=${encodeURIComponent(kps)}&sign=${encodeURIComponent(sign)}&vcode=${encodeURIComponent(vcode)}`;
-
-      $.log(`签到接口: ${path}`);
-
-      // 签到通常需要声明 content-type
-      const signHeaders = { ...headers, "Content-Type": "application/json" };
-
-      const resp = await request({
-        url,
-        method: "POST",
-        headers: signHeaders,
-        body: "{}"
-      });
-
-      const data = parseJSONSafe(resp.body);
-
-      if (data && (data.code === 0 || data.status === 200)) {
-        signSuccess = true;
-
-        const reward =
-          data.data?.sign_daily_reward ||
-          data.data?.reward ||
-          0;
-
-        rewardText = `签到成功，获得 ${reward} MB`;
-
-        break;
-      } else {
-        $.log(`接口返回: ${JSON.stringify(data)}`);
-      }
-    } catch (e) {
-      $.log(`签到失败: ${e}`);
+    if (!kps) {
+        $.msg($.name, "❌ 未获取参数", "请打开夸克网盘 App 并进入福利中心抓包");
+        return;
     }
-  }
 
-  if (signSuccess) {
-    $.msg($.name, "签到成功", rewardText);
-  } else {
-    $.msg($.name, "签到失败", "可能触发风控，请稍后重试");
-  }
+    const queryString = `pr=ucpro&fr=android&kps=${kps}&sign=${sign}&vcode=${vcode}`;
+
+    // 模拟浏览
+    await fakeBrowse(queryString);
+    await randomSleep(1, 3);
+
+    let infoData = null;
+    for (let api of API.info) {
+        try {
+            const url = `${BASE_URL}${api}?${queryString}`;
+            // 内部捕获重试，单接口失败不阻断循环
+            const data = await retry(async () => await request(url));
+            if (data && (data.data || data.code === 401)) {
+                infoData = data;
+                break;
+            }
+        } catch (e) {
+            $.log(`info接口尝试失败: ${api}, 错误: ${e.message || e}`);
+        }
+    }
+
+    if (!infoData) {
+        $.msg($.name, "❌ 获取信息失败", "所有配置接口均请求超时或失效");
+        return;
+    }
+
+    // Cookie 失效检测
+    if (infoData.code === 401 || (infoData.message || "").includes("登录")) {
+        $.msg($.name, "❌ Cookie失效", "验证凭证已过期，请重新打开夸克网盘抓包");
+        return;
+    }
+
+    const growthInfo = infoData.data || {};
+    const capSign = growthInfo.cap_sign || {};
+    const vipStatus = growthInfo["88VIP"] || growthInfo.member_type === "VIP" ? "88VIP" : "普通用户";
+    const totalCap = formatBytes(growthInfo.total_capacity || 0);
+
+    // 已签到状态判断
+    if (capSign.sign_daily === true || capSign.sign_daily_reward) {
+        $.setdata(today, "quark_last_sign");
+        $.log("检测到今日实际已完成签到");
+        return;
+    }
+
+    await randomSleep(1, 3);
+    let signSuccess = false;
+
+    for (let api of API.sign) {
+        try {
+            const signUrl = `${BASE_URL}${api}?${queryString}`;
+            const body = JSON.stringify({ sign_cyclic: true });
+            const signData = await retry(async () => await request(signUrl, "POST", body));
+
+            if (signData && signData.code === 0) {
+                const reward = (signData.data && signData.data.sign_daily_reward) || 0;
+                const progress = (capSign.sign_progress || 0) + 1;
+                $.setdata(today, "quark_last_sign");
+                $.msg(
+                    $.name,
+                    "✅ 签到成功",
+                    `身份: ${vipStatus}\n容量: ${totalCap}\n获得: ${formatBytes(reward)}\n连签: ${progress}/${capSign.sign_target || "?"}`
+                );
+                signSuccess = true;
+                break;
+            } else if (signData && signData.code === 400) {
+                // 或者是已经签到过的特殊code返回
+                $.setdata(today, "quark_last_sign");
+                $.log(`接口返回已签到: ${signData.message}`);
+                signSuccess = true;
+                break;
+            }
+        } catch (e) {
+            $.log(`sign接口尝试失败: ${api}, 错误: ${e.message || e}`);
+        }
+    }
+
+    if (!signSuccess) {
+        $.msg($.name, "❌ 签到失败", "所有签到接口尝试均未成功");
+    }
 }
 
-/* ========================= 过期检测 ========================= */
+/* ========================= 模拟浏览 ========================= */
+async function fakeBrowse(queryString) {
+    const urls = [];
+    API.info.forEach(api => urls.push(`${BASE_URL}${api}?${queryString}`));
+    API.task.forEach(api => urls.push(`${BASE_URL}${api}?${queryString}`));
+    const randomUrl = urls[Math.floor(Math.random() * urls.length)];
+    try {
+        $.log("开始模拟常规浏览动作...");
+        await request(randomUrl);
+    } catch (e) {
+        $.log("模拟浏览正常结束或被跳过");
+    }
+}
 
+/* ========================= 参数过期检测 ========================= */
 function checkExpired() {
-  const refreshTime = Number($.getdata("quark_refresh_time") || 0);
-
-  // 首次运行避免直接误判
-  if (!refreshTime) {
-    $.log("未发现 refresh_time，跳过过期检测");
+    const refreshTime = Number($.getdata("quark_refresh_time") || 0);
+    const now = Date.now();
+    if (now - refreshTime > 7 * 24 * 3600 * 1000) {
+        $.msg($.name, "⚠️ 参数即将失效", "安全期已过，请重新打开一次夸克网盘触发抓包");
+        return true;
+    }
     return false;
-  }
+}
 
-  const now = Date.now();
-
-  if (now - refreshTime > 7 * 24 * 3600 * 1000) {
-    $.msg(
-      $.name,
-      "⚠️ 参数可能过期",
-      "建议重新打开一次夸克网盘"
-    );
-    return true;
-  }
-
-  return false;
+/* ========================= 重试机制 ========================= */
+async function retry(fn, count = 3) {
+    let lastErr;
+    for (let i = 0; i < count; i++) {
+        try {
+            return await fn();
+        } catch (e) {
+            lastErr = e;
+            $.log(`动作失败，正在进行第 ${i + 1} 次重试...`);
+            await randomSleep(2, 6);
+        }
+    }
+    throw lastErr;
 }
 
 /* ========================= 请求封装 ========================= */
+function request(url, method = "GET", body = null) {
+    return new Promise((resolve, reject) => {
+        const cookie = $.getdata("quark_cookie") || " ";
+        let options = {
+            url: url,
+            timeout: 15000,
+            headers: {
+                "User-Agent": QUARK_UA,
+                "Accept": "*/*",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Accept-Language": "zh-CN,zh;q=1",
+                "Connection": "keep-alive",
+                "Origin": "https://b.quark.cn",
+                "Referer": "https://b.quark.cn/",
+                "Cookie": cookie
+            }
+        };
+        if (method === "POST") options.body = body || "{}";
+        
+        const callback = (err, resp, data) => {
+            if (err) {
+                reject(err);
+                return;
+            }
+            try {
+                resolve(typeof data === "string" ? JSON.parse(data) : data);
+            } catch (e) {
+                $.log(`返回体非标准JSON，原始内容: ${data}`);
+                reject("JSON解析失败");
+            }
+        };
 
-// 修复点：直接调用方法，防止丢失 `this` 上下文指向
-function request(options) {
-  return new Promise((resolve, reject) => {
-    const isPost = (options.method || "GET").toUpperCase() === "POST";
-    
-    if (isPost) {
-      $.post(options, (err, resp, data) => {
-        if (err) reject(err);
-        else resolve({ resp, body: data });
-      });
-    } else {
-      $.get(options, (err, resp, data) => {
-        if (err) reject(err);
-        else resolve({ resp, body: data });
-      });
-    }
-  });
+        method === "GET" ? $.get(options, callback) : $.post(options, callback);
+    });
 }
 
-/* ========================= JSON 容错 ========================= */
-
-function parseJSONSafe(data) {
-  if (!data) return {};
-  if (typeof data === "object") return data;
-
-  try {
-    return JSON.parse(data);
-  } catch (_) {
-    try {
-      if (typeof data === "string") {
-        return JSON.parse(data.trim());
-      }
-    } catch (e) {
-      $.log(`JSON 解析失败: ${e}`);
-    }
-  }
-
-  return {};
+/* ========================= 随机等待 ========================= */
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
-
-/* ========================= Header ========================= */
-
-function buildHeaders(cookie) {
-  return {
-    "Cookie": cookie,
-    "User-Agent": QUARK_UA,
-    "Referer": "https://b.quark.cn/",
-    "Origin": "https://b.quark.cn",
-    "Accept": "*/*",
-    "Accept-Language": "zh-CN,zh-Hans;q=1",
-    "Connection": "keep-alive"
-  };
-}
-
-/* ========================= 随机延迟 ========================= */
-
 async function randomSleep(min, max) {
-  const sec =
-    Math.floor(Math.random() * (max - min + 1)) + min;
-
-  $.log(`随机延迟 ${sec} 秒`);
-
-  return new Promise((resolve) =>
-    setTimeout(resolve, sec * 1000)
-  );
+    const sec = Math.floor(Math.random() * (max - min + 1)) + min;
+    $.log(`防风控：随机延迟等待 ${sec} 秒`);
+    await sleep(sec * 1000);
 }
 
-/* ========================= Env ========================= */
+/* ========================= 格式化容量 ========================= */
+function formatBytes(bytes) {
+    if (!bytes || bytes === 0) return "0 B";
+    const k = 1024;
+    const sizes = ["B", "KB", "MB", "GB", "TB", "PB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return (bytes / Math.pow(k, i)).toFixed(2) + " " + sizes[i];
+}
 
+/* ========================= Env 兼容层 ========================= */
 function Env(name) {
-  return new (class {
-    constructor(name) {
-      this.name = name;
-      this.data = null;
-      this.logs = [];
-      this.isSurge = () => typeof $httpClient !== "undefined";
-      this.isQuanX = () => typeof $task !== "undefined";
-      this.isLoon = () => typeof $loon !== "undefined";
-      this.isNode = () => typeof module !== "undefined";
-      this.log("", `🔔${this.name}, 开始!`);
-    }
+    this.name = name;
+    this.isSurge = () => typeof $httpClient !== "undefined";
+    this.isLoon = () => typeof $loon !== "undefined";
+    this.isQX = () => typeof $task !== "undefined";
+    this.getdata = (key) => {
+        if (this.isSurge() || this.isLoon()) return $persistentStore.read(key);
+        if (this.isQX()) return $prefs.valueForKey(key);
+    };
+    this.setdata = (val, key) => {
+        if (this.isSurge() || this.isLoon()) return $persistentStore.write(val, key);
+        if (this.isQX()) return $prefs.setValueForKey(val, key);
+    };
+    this.msg = (title, subtitle, body) => {
+        if (this.isSurge() || this.isLoon()) $notification.post(title, subtitle, body);
+        if (this.isQX()) $notify(title, subtitle, body);
+        console.log(`${title}\n${subtitle}\n${body}`);
+    };
+    this.log = (msg) => console.log(`[${this.name}] ${msg}`);
+    this.logErr = (err) => console.log(`[${this.name}] 错误: ${err}`);
 
-    getdata(key) {
-      if (this.isSurge() || this.isLoon()) return $persistentStore.read(key);
-      if (this.isQuanX()) return $prefs.valueForKey(key);
-      return null;
-    }
-
-    setdata(val, key) {
-      if (this.isSurge() || this.isLoon()) return $persistentStore.write(val, key);
-      if (this.isQuanX()) return $prefs.setValueForKey(val, key);
-      return null;
-    }
-
-    msg(title = name, subt = "", desc = "") {
-      if (this.isSurge() || this.isLoon()) $notification.post(title, subt, desc);
-      else if (this.isQuanX()) $notify(title, subt, desc);
-      else console.log(`${title}\n${subt}\n${desc}`);
-    }
-
-    log(...logs) {
-      console.log(logs.join("\n"));
-    }
-
-    logErr(err) {
-      console.log(err);
-    }
-
-    get(options, callback) {
-      if (this.isQuanX()) {
-        if (typeof options === "string") options = { url: options };
-        options.method = "GET";
-        $task.fetch(options).then(
-          (resp) => callback(null, resp, resp.body),
-          (err) => callback(err)
-        );
-      } else {
-        $httpClient.get(options, callback);
-      }
-    }
-
-    post(options, callback) {
-      if (this.isQuanX()) {
-        if (typeof options === "string") options = { url: options };
-        options.method = "POST";
-        $task.fetch(options).then(
-          (resp) => callback(null, resp, resp.body),
-          (err) => callback(err)
-        );
-      } else {
-        $httpClient.post(options, callback);
-      }
-    }
-
-    done(val = {}) {
-      this.log("", `🔔${this.name}, 结束!`);
-      if (typeof $done !== "undefined") $done(val);
-    }
-  })(name);
+    this.get = (options, callback) => {
+        if (this.isQX()) {
+            if (typeof options === "string") options = { url: options };
+            options.method = "GET";
+            $task.fetch(options).then(resp => callback(null, resp, resp.body), err => callback(err.error, null, null));
+        } else if (this.isSurge() || this.isLoon()) {
+            $httpClient.get(options, (err, resp, body) => callback(err, resp, body));
+        }
+    };
+    this.post = (options, callback) => {
+        if (this.isQX()) {
+            if (typeof options === "string") options = { url: options };
+            options.method = "POST";
+            $task.fetch(options).then(resp => callback(null, resp, resp.body), err => callback(err.error, null, null));
+        } else if (this.isSurge() || this.isLoon()) {
+            $httpClient.post(options, (err, resp, body) => callback(err, resp, body));
+        }
+    };
+    this.done = (val = {}) => typeof $done !== "undefined" && $done(val);
 }
