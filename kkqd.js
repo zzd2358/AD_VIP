@@ -268,7 +268,7 @@ async function randomSleep(min, max) {
         Math.floor(Math.random() * (max - min + 1)) + min;
     $.log(`⏰ 随机延迟 ${sec} 秒`);
     return new Promise((resolve) =>
-        setTimeout(resolve, sec * 1000)
+        setTimeout(resolve, sec * 100)
     );
 }
 
